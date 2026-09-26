@@ -187,3 +187,37 @@ def test_t30_compliance_dci_radiograph(dataset):
     assert "DCI" in msg.body
     assert "radiograph" in msg.body.lower()
     assert "1.0 mSv" in msg.body or "1.5 to 1.0" in msg.body
+
+
+def test_taboo_regex_sanitization():
+    """Verify that any taboo / forbidden claims are caught and sanitized by regex."""
+    from app.composer import sanitize_taboo_words
+
+    sample_bad = "We guarantee 100% safe miracle cure and best in city results with guaranteed weight loss."
+    clean = sanitize_taboo_words(sample_bad)
+
+    assert "guarantee" not in clean.lower()
+    assert "100% safe" not in clean.lower()
+    assert "miracle cure" not in clean.lower()
+    assert "best in city" not in clean.lower()
+    assert "guaranteed weight loss" not in clean.lower()
+
+
+def test_number_grounding_no_hallucination(dataset):
+    """Verify that prices and metrics in composed messages originate from input contexts, not hallucinated."""
+    import re
+
+    for pair in dataset:
+        test_id = pair["test_id"]
+        cat, m, trg, c = _load_pair_context(pair)
+        msg = compose(cat, m, trg, c)
+
+        # Check all ₹ prices in body
+        prices_in_body = re.findall(r"₹\s*[\d,]+", msg.body)
+        if prices_in_body:
+            context_str = json.dumps([cat, m, trg, c])
+            for p in prices_in_body:
+                raw_num = p.replace("₹", "").replace(",", "").strip()
+                assert raw_num in context_str.replace(",", ""), (
+                    f"{test_id}: Price {p} found in message body was not present in input context!"
+                )
