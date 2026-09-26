@@ -33,8 +33,9 @@ def test_healthz_and_metadata(client):
     res_meta = client.get("/v1/metadata")
     assert res_meta.status_code == 200
     meta = res_meta.json()
-    assert meta["team_name"] == "Team Vera"
     assert meta["model"] == "deterministic-rules-engine"
+    assert "contact_email" in meta
+    assert len(meta["team_name"]) > 0
 
 
 def test_context_push_and_versioning(client):
@@ -198,3 +199,90 @@ def test_reply_off_topic_redirect(client):
     data = res.json()
     assert data["action"] == "send"
     assert "gst" in data["body"].lower() or "ca" in data["body"].lower()
+
+
+def test_reply_join_magicpin_context_prefill(client):
+    # Push merchant context
+    merchant = json.loads((DATASET_DIR / "merchants" / "m_006_southindiancafe_restaurant_bangalore.json").read_text(encoding="utf-8"))
+    client.post("/v1/context", json={"scope": "merchant", "context_id": "m_006_southindiancafe_restaurant_bangalore", "version": 1, "payload": merchant})
+
+    # Merchant replies they want to join magicpin
+    res = client.post("/v1/reply", json={
+        "conversation_id": "conv_join_1",
+        "from_role": "merchant",
+        "merchant_id": "m_006_southindiancafe_restaurant_bangalore",
+        "message": "I want to join magicpin now. What do I need to do?",
+        "turn_number": 2
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["action"] == "send"
+    body = data["body"]
+    # Verify bot does NOT ask for details again, but confirms existing details
+    assert "South Indian Cafe" in body or "pre-filled" in body
+    assert "CONFIRM" in body
+    assert not any(q in body.lower() for q in ["what is your address", "send your menu", "give your details", "what is your name"])
+
+
+def test_reply_festival_boost_during_chat(client):
+    # Push merchant and festival trigger context
+    merchant = json.loads((DATASET_DIR / "merchants" / "m_006_southindiancafe_restaurant_bangalore.json").read_text(encoding="utf-8"))
+    client.post("/v1/context", json={"scope": "merchant", "context_id": "m_006_southindiancafe_restaurant_bangalore", "version": 1, "payload": merchant})
+    client.post("/v1/context", json={
+        "scope": "trigger",
+        "context_id": "trg_navratri_special",
+        "version": 1,
+        "payload": {
+            "kind": "festival_navratri_special",
+            "payload": {"festival_name": "Navratri"}
+        }
+    })
+
+    res = client.post("/v1/reply", json={
+        "conversation_id": "conv_fest_join_1",
+        "from_role": "merchant",
+        "merchant_id": "m_006_southindiancafe_restaurant_bangalore",
+        "message": "Ok, sign me up for magicpin.",
+        "turn_number": 2
+    })
+    assert res.status_code == 200
+    body = res.json()["body"]
+    assert "Navratri" in body
+    assert "boost" in body.lower() or "orders" in body.lower()
+    assert "CONFIRM" in body
+
+
+def test_reply_bot_to_bot_detection_and_rejection(client):
+    conv_id = "conv_bot_to_bot_1"
+
+    # Turn 1: Another chatbot replies to Vera
+    res1 = client.post("/v1/reply", json={
+        "conversation_id": conv_id,
+        "from_role": "merchant",
+        "message": "I am a virtual assistant chatbot. How can I help you today?",
+        "turn_number": 1
+    })
+    assert res1.status_code == 200
+    assert res1.json()["action"] == "send"
+    assert "auto-reply" in res1.json()["body"].lower()
+
+    # Turn 2: Repeated bot message -> Enters wait to break infinite loop
+    res2 = client.post("/v1/reply", json={
+        "conversation_id": conv_id,
+        "from_role": "merchant",
+        "message": "I am an automated assistant. Please select an option.",
+        "turn_number": 3
+    })
+    assert res2.status_code == 200
+    assert res2.json()["action"] == "wait"
+    assert res2.json()["wait_seconds"] == 86400
+
+    # Turn 4: Persistent bot-to-bot replies -> Terminates/Rejects conversation
+    res3 = client.post("/v1/reply", json={
+        "conversation_id": conv_id,
+        "from_role": "merchant",
+        "message": "Automated system message. Goodbye.",
+        "turn_number": 4
+    })
+    assert res3.status_code == 200
+    assert res3.json()["action"] == "end"

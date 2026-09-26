@@ -1,5 +1,6 @@
 """FastAPI application for Vera Message Engine."""
 
+import os
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.responses import JSONResponse
@@ -34,11 +35,11 @@ def healthz():
 @app.get("/v1/metadata", response_model=MetadataResponse)
 def metadata():
     return MetadataResponse(
-        team_name="Team Vera",
-        team_members=["Engineering Team"],
+        team_name=os.getenv("TEAM_NAME", "Team Anant"),
+        team_members=[os.getenv("TEAM_MEMBER", "Anant")],
         model="deterministic-rules-engine",
         approach="modular deterministic composer with context-grounding & intent-state routing",
-        contact_email="engineering@vera.local",
+        contact_email=os.getenv("CONTACT_EMAIL", "anantji2332@gmail.com"),
         version="1.0.0",
         submitted_at="2026-04-26T08:00:00Z",
     )
@@ -92,3 +93,11 @@ def reply(req: ReplyRequest):
         message=req.message,
         turn_number=req.turn_number,
     )
+
+
+@app.post("/v1/teardown")
+def teardown():
+    """Wipe all state — called by judge at end of test."""
+    store.reset()
+    return {"status": "wiped", "contexts_loaded": store.counts}
+

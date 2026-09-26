@@ -167,6 +167,9 @@ class ContextStore:
             "spam",
             "unsubscribe",
             "opt out",
+            "block",
+            "report",
+            "harass",
         ]
         if any(kw in msg_lower for kw in hostile_keywords):
             return ReplyResponse(
@@ -174,7 +177,7 @@ class ContextStore:
                 rationale="Merchant explicitly requested to stop messaging. Closing conversation gracefully and suppressing outreach.",
             )
 
-        # 2. Auto-Reply Detection
+        # 2. Auto-Reply / Bot-to-Bot Detection
         auto_reply_patterns = [
             "thank you for contacting",
             "our team will respond",
@@ -182,8 +185,20 @@ class ContextStore:
             "we have received your message",
             "auto-reply",
             "automated message",
+            "automated assistant",
+            "automated system",
+            "automated responder",
+            "chatbot",
+            "i am a bot",
+            "i'm a bot",
+            "i am an ai",
+            "i'm an ai",
+            "virtual assistant",
             "currently unavailable",
             "away from phone",
+            "out of office",
+            "will get back to you",
+            "main ek automated",
         ]
         if any(p in msg_lower for p in auto_reply_patterns):
             conv["auto_reply_count"] += 1
@@ -206,7 +221,23 @@ class ContextStore:
                 rationale="Detected auto-reply on first turn; sending single low-friction prompt for owner.",
             )
 
-        # 3. Explicit Intent / Action Commitment
+        # 3. Explicit Intent / Join magicpin / Action Commitment
+        join_keywords = [
+            "join magicpin",
+            "join magic pin",
+            "want to join",
+            "wants to join",
+            "sign up",
+            "signup",
+            "sign-up",
+            "sign me up",
+            "join",
+            "magicpin",
+            "magic pin",
+            "onboard",
+            "register",
+            "start with magicpin",
+        ]
         action_keywords = [
             "let's do it",
             "lets do it",
@@ -222,13 +253,48 @@ class ContextStore:
             "go ahead",
             "confirm",
             "done",
-        ]
+            "publish it",
+            "share it",
+            "just do it",
+            "go for it",
+            "chalein",
+            "haan",
+        ] + join_keywords
+
         if any(kw in msg_lower for kw in action_keywords):
+            m_ctx = self.merchants.get(merchant_id or conv.get("merchant_id", ""), {})
+            m_name = m_ctx.get("identity", {}).get("name")
+            m_loc = m_ctx.get("identity", {}).get("locality")
+
+            # Check for active festival / seasonal context in store
+            festival_boost = ""
+            for trg in self.triggers.values():
+                kind = trg.get("kind", "")
+                payload = trg.get("payload", {})
+                fest_name = payload.get("festival_name") or payload.get("event_name")
+                if "festival" in kind or "seasonal" in kind or "ipl" in kind or fest_name:
+                    fest_label = fest_name or kind.replace("_", " ").title()
+                    festival_boost = f" Plus, with {fest_label} this month, joining now will rapidly boost your customer orders and footfall."
+                    break
+
+            if any(kw in msg_lower for kw in join_keywords) or m_name:
+                detail_str = f" for {m_name}" if m_name else ""
+                loc_str = f" in {m_loc}" if m_loc else ""
+                body = (
+                    f"Awesome! I've pre-filled your magicpin onboarding{detail_str}{loc_str} with your details.{festival_boost} "
+                    f"Please review: everything matches your profile. Reply CONFIRM to verify and go live!"
+                )
+            else:
+                body = (
+                    f"Great, drafting your campaign and Google Business Profile update now — "
+                    f"ready in 90 seconds.{festival_boost} I've pre-filled all details from our chat. Reply CONFIRM to proceed."
+                )
+
             return ReplyResponse(
                 action="send",
-                body="Great, drafting your campaign and Google Business Profile update now — ready in 90 seconds. I'll pre-fill the post. Reply CONFIRM to proceed.",
+                body=body,
                 cta="binary_confirm_cancel",
-                rationale="Honoring merchant commitment; switched from qualification to immediate execution mode.",
+                rationale="Honoring merchant intent; using existing context and active festival surge to pre-fill verification rather than re-asking for details.",
             )
 
         # 4. Out-of-Scope / Off-Topic Ask
@@ -240,7 +306,16 @@ class ContextStore:
                 rationale="Out-of-scope ask politely declined; redirected back to the core marketing thread.",
             )
 
-        # 5. Default General Reply
+        # 5. Question / Curiosity Detection
+        if "?" in message or any(kw in msg_lower for kw in ["how", "what", "when", "why", "kaise", "kab", "kya"]):
+            return ReplyResponse(
+                action="send",
+                body="Great question! I've prepared the details — let me send you the full breakdown. Want me to go ahead?",
+                cta="binary_yes_no",
+                rationale="Merchant asked a question indicating engagement; responding with offer to provide details rather than ignoring the curiosity signal.",
+            )
+
+        # 6. Default General Reply (affirmative / acknowledgment)
         return ReplyResponse(
             action="send",
             body="Done! I've prepped the update for you. Reply YES to review and push it live.",
