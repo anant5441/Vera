@@ -286,3 +286,22 @@ def test_reply_bot_to_bot_detection_and_rejection(client):
     })
     assert res3.status_code == 200
     assert res3.json()["action"] == "end"
+
+
+def test_teardown_endpoint(client):
+    """Verify that POST /v1/teardown wipes all in-memory state cleanly."""
+    # Push some context
+    dentist_cat = json.loads((DATASET_DIR / "categories" / "dentists.json").read_text(encoding="utf-8"))
+    client.post("/v1/context", json={"scope": "category", "context_id": "dentists", "version": 1, "payload": dentist_cat})
+
+    health_before = client.get("/v1/healthz").json()
+    assert health_before["contexts_loaded"]["category"] == 1
+
+    # Call teardown
+    res_td = client.post("/v1/teardown")
+    assert res_td.status_code == 200
+    assert res_td.json()["status"] == "wiped"
+
+    # Healthz should show zero contexts loaded
+    health_after = client.get("/v1/healthz").json()
+    assert health_after["contexts_loaded"]["category"] == 0
