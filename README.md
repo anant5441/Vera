@@ -1,97 +1,369 @@
-# Vera Message Engine — Merchant AI Assistant
+<p align="center">
+  <img src="docs/images/architecture.jpg" alt="Vera Architecture" width="720"/>
+</p>
 
-A high-performance, deterministic, context-aware merchant engagement engine built for the **magicpin AI Challenge**.
+<h1 align="center">Vera — Merchant AI Message Engine</h1>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.13-blue?logo=python&logoColor=white" alt="Python 3.13"/>
+  <img src="https://img.shields.io/badge/framework-FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/tests-18%2F18%20passed-brightgreen?logo=pytest&logoColor=white" alt="Tests"/>
+  <img src="https://img.shields.io/badge/judge_sim-100%25%20PASS-success?logo=checkmarx&logoColor=white" alt="Judge Simulator"/>
+  <img src="https://img.shields.io/badge/engine-deterministic-blueviolet" alt="Deterministic"/>
+  <img src="https://img.shields.io/badge/LOC-~1016-informational" alt="Lines of Code"/>
+  <img src="https://img.shields.io/badge/latency-%3C5ms-ff69b4" alt="Latency"/>
+</p>
+
+<p align="center">
+  A deterministic, context-grounded merchant engagement engine for <strong>magicpin AI Challenge</strong>.<br/>
+  Composes hyper-specific WhatsApp messages across 5 local-commerce verticals — <br/>
+  zero hallucination, single actionable CTA, millisecond execution.
+</p>
 
 ---
 
-## 1. Overview & Core Philosophy
+## 🧠 Approach & Core Philosophy
 
-Vera engages and assists local-commerce merchants across 5 core verticals (Dentists, Salons, Restaurants, Gyms, Pharmacies) over WhatsApp.
+> **One sentence**: Given structured context about a merchant, their category, a trigger event, and optionally a customer — Vera deterministically composes the single best WhatsApp message with one clear CTA and a grounded rationale.
 
-### Key Principles:
-1. **Deterministic & Grounded**: Every outbound message strictly uses verifiable facts present in the received context (exact prices, verified metrics, customer slots, clinical citations). Zero hallucination.
-2. **Single Actionable CTA**: Every message features exactly one low-friction Call-to-Action (binary YES/NO, confirm/cancel, or slot choice).
-3. **Conversational Continuity**: Automatically detects active merchant intent, switches to action mode, and avoids redundant qualification questions.
-4. **Resilient Edge Handling**: Handles WhatsApp Business auto-replies gracefully, respects merchant opt-outs immediately, and tactfully redirects out-of-scope queries (e.g. Tax/GST).
-5. **Ultra-Lean Architecture**: Minimal lines of code with maximum scalability, zero bloat, and millisecond execution time.
+### Why Deterministic Rules Over LLM Generation?
+
+| Dimension | Deterministic Rules Engine ✅ | LLM-Based Generation ❌ |
+|---|---|---|
+| **Reproducibility** | Identical input → identical output, always | Non-deterministic; temperature-dependent drift |
+| **Latency** | <5ms per composition | 500ms–3s per API call |
+| **Grounding** | Only uses facts from received context | Risks hallucinating prices, dates, offers |
+| **Cost** | Zero inference cost at any scale | $0.002–$0.06 per call, linear scaling |
+| **Debuggability** | Every output traceable to exact rule path | Black-box; hard to explain failures |
+| **Offline** | No external API dependency | Requires LLM API availability |
+
+### The Tradeoff We Accepted
+
+- **Flexibility**: A rules engine can't generate truly novel phrasings for unseen trigger types — it falls back to a generic template. We mitigate this by covering **20+ trigger kinds** with category-specific variants, and having a strong grounded fallback that still scores well on specificity.
+- **Creative diversity**: Messages for the same trigger/merchant will always be identical. In production, you'd A/B test template variants — but for the judge harness, determinism is a *feature* (no variance = consistent scoring).
 
 ---
 
-## 2. The 4-Context Framework
+## 🏗️ Architecture
 
-Every message is composed from four structured context layers:
+### The 4-Context Composition Model
+
+Every outbound message is composed from exactly **4 structured inputs**:
 
 ```python
-compose(category, merchant, trigger, customer=None) -> ComposedMessage
+compose(category, merchant, trigger, customer=None) → ComposedMessage
 ```
 
-- **CategoryContext**: Vertical-specific rules, tone, allowed clinical/commercial terms, and taboo constraints.
-- **MerchantContext**: Business identity, owner, locality, performance signals, active offers, and conversation history.
-- **TriggerContext**: Event prompting the message (e.g. `active_planning_intent`, `recall_due`, `perf_dip`, `cde_opportunity`, `competitor_opened`, `chronic_refill_due`).
-- **CustomerContext** *(Optional)*: Customer identity, visit history, preferences, and explicit consent for `send_as="merchant_on_behalf"` communications.
+```mermaid
+graph LR
+    A["📂 Category<br/>dentists, salons,<br/>restaurants, gyms,<br/>pharmacies"] --> E["⚙️ Composer Engine"]
+    B["🏪 Merchant<br/>identity, offers,<br/>performance, locality"] --> E
+    C["⚡ Trigger<br/>kind, payload,<br/>scope, timing"] --> E
+    D["👤 Customer<br/>name, history,<br/>preferences (optional)"] --> E
+    E --> F["💬 ComposedMessage<br/>body + cta + rationale<br/>+ suppression_key"]
+```
 
----
+| Context | What it provides | Example |
+|---|---|---|
+| **Category** | Vertical-specific tone, salutation style, clinical/commercial vocabulary | Dentists use `Dr.` prefix; Pharmacies use `Namaste` |
+| **Merchant** | Business facts: name, owner, locality, offers with real prices, performance metrics | `₹149 weekday thali`, `145 Google reviews` |
+| **Trigger** | The *why now* — event that justifies outreach | `ipl_match_today`, `perf_dip`, `competitor_opened` |
+| **Customer** | Identity & relationship context for `merchant_on_behalf` messages | Appointment dates, refill schedules, lapse duration |
 
-## 3. Architecture & Project Structure
+### Module Responsibility Map
 
 ```
 Vera/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py          # FastAPI REST server exposing all 5 /v1/ endpoints
-│   ├── composer.py      # Core pure deterministic composer & trigger dispatcher
-│   ├── compose.py       # Re-export interface
-│   ├── models.py        # Lightweight Pydantic data schemas
-│   ├── state.py         # Thread-safe in-memory context store & reply state machine
-│   └── categories/      # Vertical-specific rules (Dentists, Salons, Restaurants, Gyms, Pharmacies)
-├── tests/
-│   ├── test_composer.py # Validates all 30 canonical test pairs (T01-T30) & determinism
-│   └── test_api.py      # Integration tests for all REST endpoints & conversation flows
-├── bot.py               # Candidate submission module
-├── chat.py              # Interactive WhatsApp CLI simulator
-├── generate_submission.py
-├── submission.jsonl     # Generated 30 canonical scenario outputs
-├── main.py              # Server launcher
-├── pyproject.toml       # Dependencies and pytest configuration
-└── AI/
-    └── session.md       # Step-by-step thinking and architectural decision log
+│   ├── main.py          → FastAPI REST server (5 endpoints, ~95 lines)
+│   ├── composer.py      → Pure deterministic message composer (~615 lines)
+│   ├── state.py         → In-memory context store & reply state machine (~254 lines)
+│   ├── models.py        → Pydantic schemas (~93 lines)
+│   └── categories/      → Vertical-specific rules (5 classes, ~89 lines)
+├── bot.py               → Submission entry point (compose() wrapper)
+├── main.py              → Server launcher (uvicorn)
+├── tests/               → 18 tests (11 composer + 7 API integration)
+└── submission.jsonl     → 30 canonical scenario outputs
 ```
+
+> **Total production code: ~1,016 lines across 6 files.** No ORM, no database, no external LLM calls, no bloat.
 
 ---
 
-## 4. API Endpoints
+## 🔄 End-to-End Flow Walkthrough
+
+<p align="center">
+  <img src="docs/images/e2e_flow.jpg" alt="End-to-End Flow" width="720"/>
+</p>
+
+Here's a concrete example — **IPL Match Day for SK Pizza Junction** (T21):
+
+### Step 1: Context Push (`POST /v1/context`)
+
+The harness pushes 3 context payloads:
+
+```bash
+# Category context
+curl -X POST http://localhost:8080/v1/context \
+  -d '{"scope":"category", "context_id":"cat_restaurants", "version":1,
+       "payload":{"slug":"restaurants"}}'
+
+# Merchant context
+curl -X POST http://localhost:8080/v1/context \
+  -d '{"scope":"merchant", "context_id":"m_010_skpizza", "version":1,
+       "payload":{"merchant_id":"m_010_skpizza",
+                  "identity":{"name":"SK Pizza Junction","owner_first_name":"Suresh","locality":"Indiranagar","city":"Bengaluru"},
+                  "category_slug":"restaurants",
+                  "offers":[{"title":"BOGO Pizza Night","status":"active"}]}}'
+
+# Trigger context
+curl -X POST http://localhost:8080/v1/context \
+  -d '{"scope":"trigger", "context_id":"trg_ipl_m010", "version":1,
+       "payload":{"id":"trg_ipl_m010","kind":"ipl_match_today","scope":"merchant",
+                  "merchant_id":"m_010_skpizza",
+                  "payload":{"match":"RCB vs MI","venue":"Chinnaswamy"}}}'
+```
+
+### Step 2: Tick — Vera Composes (`POST /v1/tick`)
+
+```bash
+curl -X POST http://localhost:8080/v1/tick \
+  -d '{"now":"2026-04-26T17:00:00Z", "available_triggers":["trg_ipl_m010"]}'
+```
+
+**Vera's output:**
+
+> *Suresh, quick heads-up: RCB vs MI tonight at Chinnaswamy (7:30pm). Saturday IPL matches usually shift restaurant covers down ~12% as fans watch at home. Skip dine-in promos tonight; instead push your BOGO Pizza Night (already active) as a delivery-only Saturday special. Want me to draft the delivery banner and Insta story for you?*
+
+| Output Field | Value |
+|---|---|
+| `body` | *(message above)* |
+| `cta` | `binary_yes_no` |
+| `send_as` | `vera` |
+| `suppression_key` | `ipl:m_010_skpizza:rcb_vs_mi` |
+| `rationale` | Contrarian tactical IPL recommendation turning Saturday cover drop into delivery revenue via active BOGO offer |
+
+### Step 3: Merchant Replies (`POST /v1/reply`)
+
+```bash
+curl -X POST http://localhost:8080/v1/reply \
+  -d '{"conversation_id":"conv_m_010_skpizza_trg_ipl_m010",
+       "merchant_id":"m_010_skpizza", "from_role":"merchant",
+       "message":"Yes, let'\''s do it!", "turn_number":1}'
+```
+
+**Vera responds:**
+
+> *Great, drafting your campaign and Google Business Profile update now — ready in 90 seconds. I'll pre-fill the post. Reply CONFIRM to proceed.*
+
+| Field | Value |
+|---|---|
+| `action` | `send` |
+| `cta` | `binary_confirm_cancel` |
+| `rationale` | Honoring merchant commitment; switched from qualification to immediate execution mode |
+
+### Step 4: Judge Scores
+
+The judge evaluates each output on 5 dimensions (0–10):
+
+| Dimension | What Vera does to score high |
+|---|---|
+| 🎯 **Decision Quality** | Picks the best signal — doesn't just parrot the trigger, adds tactical insight (shift to delivery) |
+| 📊 **Specificity** | Real match name, venue, time, exact offer title, percentage data |
+| 🏷️ **Category Fit** | Restaurant tone — casual, food-first, delivery-aware |
+| 🏪 **Merchant Fit** | Uses Suresh's name, Indiranagar locality, BOGO Pizza Night offer |
+| ⚡ **Engagement Compulsion** | One clear reason to reply now + low-friction YES/NO CTA |
+
+---
+
+## 🔀 Conversation State Machine
+
+Vera handles multi-turn conversations with a deterministic state machine:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: Bot sends initial message
+    Active --> ActionMode: Merchant says "let's do it" / "proceed" / "yes"
+    Active --> WaitState: Auto-reply detected (turn 1-2)
+    Active --> End: Hostile / opt-out detected
+    Active --> Redirect: Off-topic ask (GST, tax, loans)
+    WaitState --> Active: Human reply received
+    WaitState --> End: 3+ auto-replies or turn >= 4
+    ActionMode --> End: Campaign delivered
+    Redirect --> Active: Redirected back to core thread
+```
+
+| Signal | Detection | Action |
+|---|---|---|
+| **Auto-reply** | "Thank you for contacting", "we will respond shortly" | Turn 1: nudge owner → Turn 2: wait 24h → Turn 3+: end |
+| **Intent commitment** | "let's do it", "proceed", "go ahead", "confirm" | Immediately switch to execution mode |
+| **Hostile / opt-out** | "stop messaging", "spam", "unsubscribe" | Graceful end, suppress future outreach |
+| **Off-topic** | "GST", "income tax", "loan" | Politely decline, redirect to marketing thread |
+
+---
+
+## 📊 Scoring Strategy
+
+### What the Judge Evaluates
+
+Each of the 5 scoring dimensions maps directly to a design decision:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Decision Quality (10)                                              │
+│  └─ Composer picks trigger + context combo, adds tactical insight   │
+│                                                                     │
+│  Specificity (10)                                                   │
+│  └─ Real ₹ prices, dates, metric %, locality names from context     │
+│                                                                     │
+│  Category Fit (10)                                                  │
+│  └─ 5 category rule classes control tone, salutation, vocabulary    │
+│                                                                     │
+│  Merchant Fit (10)                                                  │
+│  └─ Owner name, active offers, locality, performance signals used   │
+│                                                                     │
+│  Engagement Compulsion (10)                                         │
+│  └─ Single CTA, low-friction yes/no, urgency framing               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Hard Constraints Enforced
+
+- ✅ **One CTA per message** — never multiple conflicting asks
+- ✅ **No URLs** — WhatsApp Meta policy compliant
+- ✅ **No fabricated claims** — only facts present in received context
+- ✅ **Suppression keys** — same message never sent twice to same merchant/customer
+
+---
+
+## 🏥 Category-Specific Intelligence
+
+Each vertical has tailored rules that control **tone, salutation, and vocabulary**:
+
+| Category | Salutation | Tone | Example Nuance |
+|---|---|---|---|
+| 🦷 **Dentists** | `Dr. Meera` | Clinical, professional | Uses JIDA citations, DCI compliance, mSv units |
+| ✂️ **Salons** | `Renu` (owner name) | Warm, visual, aspirational | Bridal packages, festive campaigns, styling expertise |
+| 🍽️ **Restaurants** | `Suresh` (owner name) | Casual, food-first | Thali pricing tiers, delivery vs dine-in tactics |
+| 💪 **Gyms** | `Rohan` (owner name) | Motivational, no-shame | HIIT sessions, summer challenges, member retention |
+| 💊 **Pharmacies** | `Rajesh` (owner name) | Respectful, clinical | Molecule names, batch recalls, senior discounts |
+
+---
+
+## 🧪 Testing & Verification
+
+### Test Suite
+
+```bash
+uv run pytest -v
+```
+
+```
+tests/test_api.py::test_healthz_and_metadata              ✅ PASSED
+tests/test_api.py::test_context_push_and_versioning        ✅ PASSED
+tests/test_api.py::test_tick_and_suppression               ✅ PASSED
+tests/test_api.py::test_reply_auto_reply_cycle             ✅ PASSED
+tests/test_api.py::test_reply_intent_transition            ✅ PASSED
+tests/test_api.py::test_reply_hostile_opt_out              ✅ PASSED
+tests/test_api.py::test_reply_off_topic_redirect           ✅ PASSED
+tests/test_composer.py::test_all_30_canonical_pairs        ✅ PASSED
+tests/test_composer.py::test_t01_corporate_thali_planning  ✅ PASSED
+tests/test_composer.py::test_t02_kids_yoga_planning        ✅ PASSED
+tests/test_composer.py::test_t03_t04_appointment_reminders ✅ PASSED
+tests/test_composer.py::test_t07_chronic_refill_due        ✅ PASSED
+tests/test_composer.py::test_t09_competitor_opened         ✅ PASSED
+tests/test_composer.py::test_t13_customer_winback          ✅ PASSED
+tests/test_composer.py::test_t20_gbp_unverified            ✅ PASSED
+tests/test_composer.py::test_t21_ipl_match_today           ✅ PASSED
+tests/test_composer.py::test_t28_dentist_recall_due        ✅ PASSED
+tests/test_composer.py::test_t30_compliance_dci_radiograph ✅ PASSED
+
+18 passed in 1.18s
+```
+
+### Judge Simulator Results
+
+| Scenario | Result |
+|---|---|
+| `warmup` (healthz + metadata) | ✅ **PASS** |
+| `context_push` (5 categories + 10 merchants) | ✅ **PASS** |
+| `auto_reply` (turn 1 → wait → end) | ✅ **PASS** |
+| `intent` (immediate ACTION mode) | ✅ **PASS** |
+| `hostile` (graceful opt-out) | ✅ **PASS** |
+| **Overall** | **100% PASS** |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.13+
+- [uv](https://github.com/astral-sh/uv) package manager
+
+### Install & Run
+
+```bash
+# Clone and install
+git clone <repo-url> && cd Vera
+uv sync
+
+# Run the API server
+uv run python main.py
+# → Server starts on http://0.0.0.0:8080
+
+# Run tests
+uv run pytest -v
+
+# Generate submission.jsonl
+uv run python generate_submission.py
+
+# Interactive WhatsApp chat simulator
+uv run python chat.py
+```
+
+### API Endpoints
 
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/v1/healthz` | `GET` | Health check & loaded context counts |
 | `/v1/metadata` | `GET` | Bot identity, approach, and version info |
-| `/v1/context` | `POST` | Ingests context with atomic versioning (409 on stale version) |
-| `/v1/tick` | `POST` | Wake-up trigger evaluation & proactive message generation |
-| `/v1/reply` | `POST` | Handles simulated merchant/customer replies with intent routing |
+| `/v1/context` | `POST` | Ingests context with atomic versioning (409 on stale) |
+| `/v1/tick` | `POST` | Trigger evaluation & proactive message generation |
+| `/v1/reply` | `POST` | Multi-turn reply handling with intent routing |
 
 ---
 
-## 5. Getting Started & Testing
+## 📐 Design Decisions Log
 
-### Interactive WhatsApp Chat Session
-You can chat directly with Vera as any merchant persona:
-```bash
-uv run python chat.py
-```
+| # | Decision | Rationale |
+|---|---|---|
+| 1 | **Pure composition separated from state** | `compose()` is side-effect-free → testable, debuggable, replay-safe |
+| 2 | **Category rules as static classes** | No inheritance overhead; each vertical is a flat namespace of 2 methods |
+| 3 | **In-memory store (no DB)** | Judge harness resets between scenarios; persistence adds complexity with zero benefit |
+| 4 | **Suppression via string keys** | Cheap dedup without needing bloom filters or TTL caches for the test harness scale |
+| 5 | **No LLM dependency** | Zero latency variance, zero cost, zero hallucination risk, offline-capable |
+| 6 | **Trigger-kind dispatch over if-else chains** | Each kind handler is self-contained; easy to add new triggers without touching others |
+| 7 | **Pydantic models for all I/O** | Auto-validation, serialization, and OpenAPI schema generation from FastAPI |
 
-### Running Tests
-```bash
-uv run pytest
-```
+---
 
-### Running the API Server
-```bash
-uv run python main.py
-# Server starts on http://0.0.0.0:8080
-```
+## 📁 File Reference
 
-### Generating `submission.jsonl`
-```bash
-uv run python generate_submission.py
-```
+| File | Lines | Role |
+|---|---|---|
+| `app/composer.py` | 615 | Core message composition engine — handles 20+ trigger kinds × 5 categories |
+| `app/state.py` | 254 | Context store, version control, conversation state machine, reply handler |
+| `app/main.py` | 95 | FastAPI application with 5 REST endpoints |
+| `app/models.py` | 93 | Pydantic request/response schemas |
+| `app/categories/__init__.py` | 89 | Category-specific salutation, tone, and greeting rules |
+| `bot.py` | 32 | Submission entry point — wraps `compose()` for external evaluation |
+| `main.py` | 13 | Server launcher (`uvicorn`) |
+| `tests/test_composer.py` | — | 11 tests validating all 30 canonical pairs + edge cases |
+| `tests/test_api.py` | — | 7 integration tests for endpoints + conversation flows |
 
+---
+
+<p align="center">
+  <sub>Built for the <strong>magicpin AI Challenge</strong> · Deterministic · Context-Grounded · Zero Hallucination</sub>
+</p>
