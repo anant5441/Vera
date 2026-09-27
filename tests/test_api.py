@@ -24,6 +24,12 @@ def client():
 
 
 def test_healthz_and_metadata(client):
+    # Test root / endpoint for uptime cron ping
+    res_root = client.get("/")
+    assert res_root.status_code == 200
+    assert res_root.json()["status"] == "ok"
+    assert "uptime_seconds" in res_root.json()
+
     res = client.get("/v1/healthz")
     assert res.status_code == 200
     data = res.json()

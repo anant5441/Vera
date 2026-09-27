@@ -23,6 +23,15 @@ app = FastAPI(
 )
 
 
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "service": "vera-message-engine",
+        "uptime_seconds": store.uptime_seconds,
+    }
+
+
 @app.get("/v1/healthz", response_model=HealthzResponse)
 def healthz():
     return HealthzResponse(
